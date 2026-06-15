@@ -448,7 +448,13 @@ function wisdomView() {
 
       <section class="card span6">
         <h2>Affirmations</h2>
-        <div class="list">${state.affirmations.map(a => `<div class="item"><strong>${escapeHtml(a.text)}</strong></div>`).join('')}</div>
+        <div class="list">${state.affirmations.map(a => `
+          <div class="item">
+            <div class="item-top">
+              <strong>${escapeHtml(a.text)}</strong>
+              <button class="danger deleteAffirmation" data-id="${a.id}">Delete</button>
+            </div>
+          </div>`).join('')}</div>
         <button class="primary" id="affirmToday">${state.daily.affirmed ? 'Affirmed Today ✓' : 'I Affirmed Today'}</button>
       </section>
 
@@ -661,7 +667,13 @@ function settingsView() {
         <h2>Affirmations Manager</h2>
         <label>New Affirmation</label><input id="newAffirmation" />
         <button class="primary" id="addAffirmation">Add Affirmation</button>
-        <div class="list">${state.affirmations.map(a => `<div class="item"><strong>${escapeHtml(a.text)}</strong></div>`).join('')}</div>
+        <div class="list">${state.affirmations.map(a => `
+          <div class="item">
+            <div class="item-top">
+              <strong>${escapeHtml(a.text)}</strong>
+              <button class="danger deleteAffirmation" data-id="${a.id}">Delete</button>
+            </div>
+          </div>`).join('')}</div>
       </section>
 
       <section class="card span6">
@@ -681,7 +693,10 @@ function goalEditItem(g) {
       <label>Identity Statement</label><textarea class="goalStatement" data-id="${g.id}">${escapeHtml(g.identity_statement || '')}</textarea>
       <label>Status</label><select class="goalStatus" data-id="${g.id}"><option ${g.status==='Active'?'selected':''}>Active</option><option ${g.status==='Paused'?'selected':''}>Paused</option><option ${g.status==='Achieved'?'selected':''}>Achieved</option></select>
       <label>Next Single Action</label><input class="goalNext" data-id="${g.id}" value="${escapeHtml(g.next_action || '')}" />
-      <button class="primary saveGoal" data-id="${g.id}">Save Goal</button>
+      <div class="footer-actions">
+        <button class="primary saveGoal" data-id="${g.id}">Save Goal</button>
+        <button class="danger deleteGoal" data-id="${g.id}">Delete Goal</button>
+      </div>
     </div>
   `
 }
@@ -694,7 +709,10 @@ function trickEditItem(t) {
       <select class="trickActive" data-id="${t.id}"><option value="true" ${t.active ? 'selected' : ''}>Active Rotation</option><option value="false" ${!t.active ? 'selected' : ''}>Archived</option></select>
       <label>Performance Ready?</label>
       <select class="trickReady" data-id="${t.id}"><option value="false" ${!t.performance_ready ? 'selected' : ''}>Not Yet</option><option value="true" ${t.performance_ready ? 'selected' : ''}>Performance Ready</option></select>
-      <button class="primary saveTrick" data-id="${t.id}">Save Trick</button>
+      <div class="footer-actions">
+        <button class="primary saveTrick" data-id="${t.id}">Save Trick</button>
+        <button class="danger deleteTrick" data-id="${t.id}">Delete Trick</button>
+      </div>
     </div>
   `
 }
@@ -761,6 +779,24 @@ function bindSettings() {
       active: card.querySelector('.trickActive').value === 'true',
       performance_ready: card.querySelector('.trickReady').value === 'true'
     }).eq('id', id).eq('user_id', state.user.id)
+    await render()
+  })
+
+  document.querySelectorAll('.deleteAffirmation').forEach(btn => btn.onclick = async () => {
+    if (!confirm('Delete this affirmation?')) return
+    await supabase.from('affirmations').delete().eq('id', btn.dataset.id).eq('user_id', state.user.id)
+    await render()
+  })
+
+  document.querySelectorAll('.deleteGoal').forEach(btn => btn.onclick = async () => {
+    if (!confirm('Delete this goal? This cannot be undone.')) return
+    await supabase.from('goals').delete().eq('id', btn.dataset.id).eq('user_id', state.user.id)
+    await render()
+  })
+
+  document.querySelectorAll('.deleteTrick').forEach(btn => btn.onclick = async () => {
+    if (!confirm('Delete this magic trick? This cannot be undone.')) return
+    await supabase.from('magic_repertoire').delete().eq('id', btn.dataset.id).eq('user_id', state.user.id)
     await render()
   })
 }
