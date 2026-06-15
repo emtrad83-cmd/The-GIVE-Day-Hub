@@ -51,7 +51,10 @@ let state = {
   family: [],
   finances: [],
   relationships: [],
-  logs28: []
+  goalProgress: [],
+  logs28: [],
+  savedButton: null,
+  savedText: null
 }
 
 const $ = (id) => document.getElementById(id)
@@ -156,6 +159,7 @@ async function loadAll() {
     supabase.from('gu_family').select('*').eq('user_id', user_id).order('created_at', { ascending: false }),
     supabase.from('finances').select('*').eq('user_id', user_id).gte('entry_date', selectedMonthStart()).order('entry_date', { ascending: false }),
     supabase.from('relationships').select('*').eq('user_id', user_id).gte('connection_date', weekStart).lte('connection_date', toDate).order('connection_date', { ascending: false }),
+    supabase.from('goal_progress').select('*').eq('user_id', user_id).gte('progress_date', weekStart).lte('progress_date', toDate).order('progress_date', { ascending: false }),
     supabase.from('daily_logs').select('*').eq('user_id', user_id).gte('log_date', fromDate).lte('log_date', toDate).order('log_date')
   ])
 
@@ -168,7 +172,8 @@ async function loadAll() {
   state.family = queries[6].data || []
   state.finances = queries[7].data || []
   state.relationships = queries[8].data || []
-  state.logs28 = queries[9].data || []
+  state.goalProgress = queries[9].data || []
+  state.logs28 = queries[10].data || []
 }
 
 async function ensureDefaults(user_id) {
@@ -246,6 +251,7 @@ function bindShell() {
   if (state.active === 'wealth') bindWealth()
   if (state.active === 'wellness') bindWellness()
   if (state.active === 'settings') bindSettings()
+  applySavedFeedback()
 }
 
 async function changeDate(delta) {
@@ -336,6 +342,7 @@ function dashboardView() {
 }
 
 function goalTrackerView() {
+  const movedThisWeek = new Set(state.goalProgress.map(p => p.goal_id)).size
   const counts = {
     Active: state.goals.filter(g => g.status === 'Active').length,
     Paused: state.goals.filter(g => g.status === 'Paused').length,
@@ -348,6 +355,7 @@ function goalTrackerView() {
       <div class="goal-count"><strong>${counts.Paused}</strong>Paused</div>
       <div class="goal-count"><strong>${counts.Achieved}</strong>Achieved</div>
     </div>
+    <div class="kpi" style="margin-top:12px;"><div class="kpi-line"><strong>Goals Moved This Week</strong><span>${movedThisWeek}</span></div></div>
     <h3 style="margin-top:16px;">Next Single Actions</h3>
     <div class="list">
       ${activeGoals.length ? activeGoals.map(g => `
@@ -450,10 +458,7 @@ function wisdomView() {
         <h2>Affirmations</h2>
         <div class="list">${state.affirmations.map(a => `
           <div class="item">
-            <div class="item-top">
-              <strong>${escapeHtml(a.text)}</strong>
-              <button class="danger deleteAffirmation" data-id="${a.id}">Delete</button>
-            </div>
+            <strong>${escapeHtml(a.text)}</strong>
           </div>`).join('')}</div>
         <button class="primary" id="affirmToday">${state.daily.affirmed ? 'Affirmed Today ✓' : 'I Affirmed Today'}</button>
       </section>
@@ -477,11 +482,15 @@ function wisdomView() {
 
       <section class="card span12">
         <h2>Goals</h2>
+        <p class="muted">Log what you did today to move a goal forward. Goal setup still lives in Settings.</p>
         <div class="list">${state.goals.map(g => `
           <div class="item">
             <div class="item-top"><strong>${escapeHtml(g.name)}</strong><span class="badge">${escapeHtml(g.status || 'Active')}</span></div>
             <p>${escapeHtml(g.identity_statement || GOAL_STATEMENTS[g.name] || '')}</p>
             <p class="small"><strong>Next action:</strong> ${escapeHtml(g.next_action || 'No next action set yet.')}</p>
+            <label>Progress today</label>
+            <textarea class="goalProgressNote" data-goal="${g.id}" placeholder="What did you do today to move this goal forward?"></textarea>
+            <button class="primary logGoalProgress" data-goal="${g.id}">Log Progress</button>
           </div>`).join('')}
         </div>
       </section>
@@ -492,14 +501,30 @@ function wisdomView() {
 function bindWisdom() {
   $('saveGratitude').onclick = async () => {
     const gratitude = [0,1,2,3,4].map(i => $(`grat${i}`).value)
-    await updateDaily({ gratitude })
+    await updateDaily({ gratitude }, 'saveGratitude', 'Saved ✓')
   }
-  $('affirmToday').onclick = async () => updateDaily({ affirmed: true })
-  $('saveManifestation').onclick = async () => updateDaily({ manifestation: $('manifestation').value })
+  $('affirmToday').onclick = async () => updateDaily({ affirmed: true }, 'affirmToday', 'Affirmed ✓')
+  $('saveManifestation').onclick = async () => updateDaily({ manifestation: $('manifestation').value }, 'saveManifestation', 'Saved ✓')
   $('saveMagic').onclick = async () => {
     await supabase.from('magic_practice').insert({ user_id: state.user.id, practice_date: state.selectedDate, trick_name: $('magicTrick').value, minutes: Number($('magicMinutes').value || 0), note: $('magicNote').value })
+    state.savedButton = 'saveMagic'
+    state.savedText = 'Logged ✓'
     await render()
   }
+  document.querySelectorAll('.logGoalProgress').forEach(btn => btn.onclick = async () => {
+    const goalId = btn.dataset.goal
+    const note = btn.closest('.item').querySelector('.goalProgressNote').value.trim()
+    if (!note) {
+      alert('Add a quick progress note first.')
+      return
+    }
+    await supabase.from('goal_progress').insert({ user_id: state.user.id, goal_id: goalId, progress_date: state.selectedDate, progress_note: note })
+    state.savedButton = null
+    state.savedText = null
+    btn.classList.add('saved')
+    btn.textContent = 'Logged ✓'
+    setTimeout(() => { btn.classList.remove('saved'); btn.textContent = 'Log Progress' }, 1600)
+  })
 }
 
 function wealthView() {
@@ -543,6 +568,8 @@ function wealthView() {
         <label>Amount</label><input id="finAmount" type="number" />
         <label>Category</label><select id="finCat"><option>Business</option><option>Personal</option><option>Subscription</option><option>Travel</option><option>Other</option></select>
         <button class="primary" id="saveFinance">Add Entry</button>
+        <h3>Entries This Month</h3>
+        <div class="list">${state.finances.map(financeEditItem).join('') || '<p class="muted">No income or expense entries yet.</p>'}</div>
       </section>
 
       <section class="card span4">
@@ -551,7 +578,7 @@ function wealthView() {
         <label>Stage</label><select id="prospectStage">${STAGES.map(s => `<option>${s}</option>`).join('')}</select>
         <label>Next Step</label><input id="prospectNext" />
         <button class="primary" id="addProspect">Add Prospect</button>
-        <div class="list">${state.prospects.map(p => `<div class="item"><div class="item-top"><strong>${escapeHtml(p.name)}</strong><span class="badge">${escapeHtml(p.stage)}</span></div><p class="small">${escapeHtml(p.next_step || '')}</p></div>`).join('')}</div>
+        <div class="list">${state.prospects.map(prospectEditItem).join('')}</div>
       </section>
 
       <section class="card span4">
@@ -568,20 +595,74 @@ function wealthView() {
 }
 
 function bindWealth() {
-  $('saveGU').onclick = async () => updateDaily({ reach_outs: Number($('reachOuts').value || 0), samples: Number($('samples').value || 0), six_w: Number($('sixW').value || 0) })
+  $('saveGU').onclick = async () => updateDaily({ reach_outs: Number($('reachOuts').value || 0), samples: Number($('samples').value || 0), six_w: Number($('sixW').value || 0) }, 'saveGU', 'Saved ✓')
   $('saveFinance').onclick = async () => {
     const type = $('finType').value
     await supabase.from('finances').insert({ user_id: state.user.id, entry_type: type, source: type === 'Income' ? $('finDesc').value : null, description: type === 'Expense' ? $('finDesc').value : null, amount: Number($('finAmount').value || 0), entry_date: state.selectedDate, category: $('finCat').value })
+    state.savedButton = 'saveFinance'
+    state.savedText = 'Added ✓'
     await render()
   }
   $('addProspect').onclick = async () => {
     await supabase.from('prospects').insert({ user_id: state.user.id, name: $('prospectName').value, stage: $('prospectStage').value, last_contact: state.selectedDate, next_step: $('prospectNext').value })
+    state.savedButton = 'addProspect'
+    state.savedText = 'Added ✓'
     await render()
   }
   $('addFamily').onclick = async () => {
     await supabase.from('gu_family').insert({ user_id: state.user.id, name: $('familyName').value, role: $('familyRole').value, phone: $('familyPhone').value, email: $('familyEmail').value, date_joined: state.selectedDate })
+    state.savedButton = 'addFamily'
+    state.savedText = 'Added ✓'
     await render()
   }
+
+  document.querySelectorAll('.saveFinanceEntry').forEach(btn => btn.onclick = async () => {
+    const card = btn.closest('.item')
+    const id = btn.dataset.id
+    const type = card.querySelector('.financeType').value
+    await supabase.from('finances').update({
+      entry_type: type,
+      source: type === 'Income' ? card.querySelector('.financeDesc').value : null,
+      description: type === 'Expense' ? card.querySelector('.financeDesc').value : null,
+      amount: Number(card.querySelector('.financeAmount').value || 0),
+      entry_date: card.querySelector('.financeDate').value,
+      category: card.querySelector('.financeCategory').value
+    }).eq('id', id).eq('user_id', state.user.id)
+    btn.classList.add('saved'); btn.textContent = 'Saved ✓'
+    setTimeout(() => { btn.classList.remove('saved'); btn.textContent = 'Save' }, 1600)
+  })
+
+  document.querySelectorAll('.deleteFinanceEntry').forEach(btn => btn.onclick = async () => {
+    if (!confirm('Delete this income/expense entry?')) return
+    await supabase.from('finances').delete().eq('id', btn.dataset.id).eq('user_id', state.user.id)
+    await render()
+  })
+
+  document.querySelectorAll('.saveProspect').forEach(btn => btn.onclick = async () => {
+    const card = btn.closest('.item')
+    await supabase.from('prospects').update({
+      name: card.querySelector('.prospectNameEdit').value,
+      stage: card.querySelector('.prospectStageEdit').value,
+      last_contact: card.querySelector('.prospectLastEdit').value,
+      next_step: card.querySelector('.prospectNextEdit').value
+    }).eq('id', btn.dataset.id).eq('user_id', state.user.id)
+    await render()
+  })
+
+  document.querySelectorAll('.deleteProspect').forEach(btn => btn.onclick = async () => {
+    if (!confirm('Delete this prospect?')) return
+    await supabase.from('prospects').delete().eq('id', btn.dataset.id).eq('user_id', state.user.id)
+    await render()
+  })
+
+  document.querySelectorAll('.moveToFamily').forEach(btn => btn.onclick = async () => {
+    const p = state.prospects.find(x => x.id === btn.dataset.id)
+    if (!p) return
+    const role = p.stage === 'Patron or Giver' ? 'Patron' : 'Giver'
+    await supabase.from('gu_family').insert({ user_id: state.user.id, name: p.name, role, date_joined: state.selectedDate, note: p.next_step || '' })
+    await supabase.from('prospects').delete().eq('id', p.id).eq('user_id', state.user.id)
+    await render()
+  })
 }
 
 function wellnessView() {
@@ -613,15 +694,23 @@ function wellnessView() {
         <button class="primary" id="saveRelationship">Log Connection</button>
         <div class="list">${state.relationships.map(r => `<div class="item"><strong>${escapeHtml(r.person_group || 'Social Rest Day')}</strong><p class="small">${escapeHtml(r.note || '')}</p></div>`).join('')}</div>
       </section>
+
+      <section class="card span12">
+        <h2>Wellness History</h2>
+        <p class="muted">Workout and Bevel data save into your daily log. Use the date arrows above to edit any day.</p>
+        <div class="list">${wellnessHistoryView()}</div>
+      </section>
     </div>
   `
 }
 
 function bindWellness() {
-  $('saveWorkout').onclick = async () => updateDaily({ workout_status: $('workoutStatus').value, workout_type: $('workoutType').value, workout_duration: Number($('workoutDuration').value || 0), workout_notes: $('workoutNotes').value })
-  $('saveBevel').onclick = async () => updateDaily({ bevel_recovery: Number($('bevelRecovery').value || 0), bevel_sleep: Number($('bevelSleep').value || 0), bevel_strain: Number($('bevelStrain').value || 0), bevel_stress: Number($('bevelStress').value || 0) })
+  $('saveWorkout').onclick = async () => updateDaily({ workout_status: $('workoutStatus').value, workout_type: $('workoutType').value, workout_duration: Number($('workoutDuration').value || 0), workout_notes: $('workoutNotes').value }, 'saveWorkout', 'Saved ✓')
+  $('saveBevel').onclick = async () => updateDaily({ bevel_recovery: Number($('bevelRecovery').value || 0), bevel_sleep: Number($('bevelSleep').value || 0), bevel_strain: Number($('bevelStrain').value || 0), bevel_stress: Number($('bevelStress').value || 0) }, 'saveBevel', 'Saved ✓')
   $('saveRelationship').onclick = async () => {
     await supabase.from('relationships').insert({ user_id: state.user.id, connection_date: state.selectedDate, person_group: $('relPerson').value, connection_type: $('relType').value, note: $('relNote').value })
+    state.savedButton = 'saveRelationship'
+    state.savedText = 'Logged ✓'
     await render()
   }
 }
@@ -801,7 +890,7 @@ function bindSettings() {
   })
 }
 
-async function updateDaily(payload) {
+async function updateDaily(payload, savedButton = null, savedText = 'Saved ✓') {
   const { data, error } = await supabase.from('daily_logs').upsert({
     id: state.daily.id,
     user_id: state.user.id,
@@ -813,9 +902,84 @@ async function updateDaily(payload) {
   if (error) alert(error.message)
   else {
     state.daily = data
+    state.savedButton = savedButton
+    state.savedText = savedText
     await render()
   }
 }
+
+
+function financeEditItem(f) {
+  const desc = f.entry_type === 'Income' ? (f.source || '') : (f.description || '')
+  return `
+    <div class="item">
+      <div class="row">
+        <div class="col3"><label>Date</label><input class="financeDate" type="date" value="${escapeHtml(f.entry_date)}" /></div>
+        <div class="col3"><label>Type</label><select class="financeType"><option ${f.entry_type==='Income'?'selected':''}>Income</option><option ${f.entry_type==='Expense'?'selected':''}>Expense</option></select></div>
+        <div class="col3"><label>Amount</label><input class="financeAmount" type="number" value="${f.amount ?? 0}" /></div>
+        <div class="col3"><label>Category</label><select class="financeCategory"><option ${f.category==='Business'?'selected':''}>Business</option><option ${f.category==='Personal'?'selected':''}>Personal</option><option ${f.category==='Subscription'?'selected':''}>Subscription</option><option ${f.category==='Travel'?'selected':''}>Travel</option><option ${f.category==='Other'?'selected':''}>Other</option></select></div>
+        <div class="col12"><label>Source / Description</label><input class="financeDesc" value="${escapeHtml(desc)}" /></div>
+      </div>
+      <div class="footer-actions">
+        <button class="primary saveFinanceEntry" data-id="${f.id}">Save</button>
+        <button class="danger deleteFinanceEntry" data-id="${f.id}">Delete</button>
+      </div>
+    </div>
+  `
+}
+
+function prospectEditItem(p) {
+  const stageClass = `stage-${String(p.stage || '').toLowerCase().replaceAll(' ', '-').replaceAll('/', '-')}`
+  return `
+    <div class="item stage-card ${stageClass}">
+      <div class="item-top"><strong>${escapeHtml(p.name)}</strong><span class="badge stage-badge ${stageClass}">${escapeHtml(p.stage)}</span></div>
+      <label>Name</label><input class="prospectNameEdit" value="${escapeHtml(p.name)}" />
+      <label>Stage</label><select class="prospectStageEdit">${STAGES.map(s => `<option ${p.stage===s?'selected':''}>${s}</option>`).join('')}</select>
+      <label>Last Contact</label><input class="prospectLastEdit" type="date" value="${escapeHtml(p.last_contact || state.selectedDate)}" />
+      <label>Next Step</label><input class="prospectNextEdit" value="${escapeHtml(p.next_step || '')}" />
+      <div class="footer-actions">
+        <button class="primary saveProspect" data-id="${p.id}">Save</button>
+        <button class="moveToFamily" data-id="${p.id}">Move to GU Family</button>
+        <button class="danger deleteProspect" data-id="${p.id}">Delete</button>
+      </div>
+    </div>
+  `
+}
+
+function wellnessHistoryView() {
+  const rows = state.logs28
+    .filter(l => l.workout_status || l.bevel_recovery !== null || l.bevel_sleep !== null || l.bevel_strain !== null || l.bevel_stress !== null)
+    .slice()
+    .reverse()
+    .slice(0, 10)
+
+  if (!rows.length) return '<p class="muted">No wellness data logged yet.</p>'
+
+  return rows.map(l => `
+    <div class="item">
+      <div class="item-top"><strong>${escapeHtml(l.log_date)}</strong><span class="badge">${escapeHtml(l.workout_status || 'No workout')}</span></div>
+      <p class="small tight"><strong>Workout:</strong> ${escapeHtml(l.workout_type || '—')} ${l.workout_duration ? `• ${l.workout_duration} min` : ''}</p>
+      <p class="small tight"><strong>Bevel:</strong> Recovery ${l.bevel_recovery ?? '—'}% • Sleep ${l.bevel_sleep ?? '—'}% • Strain ${l.bevel_strain ?? '—'}% • Stress ${l.bevel_stress ?? '—'}</p>
+      <p class="small tight">${escapeHtml(l.workout_notes || '')}</p>
+    </div>
+  `).join('')
+}
+
+function applySavedFeedback() {
+  if (!state.savedButton) return
+  const btn = $(state.savedButton)
+  if (!btn) return
+  const original = btn.textContent
+  btn.classList.add('saved')
+  btn.textContent = state.savedText || 'Saved ✓'
+  setTimeout(() => {
+    btn.classList.remove('saved')
+    btn.textContent = original
+    state.savedButton = null
+    state.savedText = null
+  }, 1600)
+}
+
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]))

@@ -241,3 +241,48 @@ textarea { min-height: 90px; resize: vertical; }
   .col2, .col3, .col4, .col5, .col6, .col8, .col12 { grid-column: span 1; }
   .top { align-items: flex-start; flex-direction: column; }
 }
+/* GIVE Day Hub v3.3 additions */
+button.saved,
+.primary.saved {
+  background: #168a4a !important;
+  border-color: #168a4a !important;
+  color: #ffffff !important;
+}
+
+.stage-card {
+  border-left: 8px solid #d9e3f2;
+}
+
+.stage-badge {
+  color: #0b2d5c;
+}
+
+.stage-outreach {
+  border-left-color: #8aa4c7;
+  background-color: #f5f8fc;
+}
+
+.stage-conversation {
+  border-left-color: #4f8fd8;
+  background-color: #eef6ff;
+}
+
+.stage-sample {
+  border-left-color: #f6c85f;
+  background-color: #fff8e6;
+}
+
+.stage-video {
+  border-left-color: #8b5cf6;
+  background-color: #f5f0ff;
+}
+
+.stage-video-follow-up {
+  border-left-color: #f59e0b;
+  background-color: #fff4df;
+}
+
+.stage-patron-or-giver {
+  border-left-color: #168a4a;
+  background-color: #edfdf4;
+}
