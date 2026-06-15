@@ -1,0 +1,15 @@
+{
+  "name": "The GIVE Day Hub",
+  "short_name": "GIVE Hub",
+  "start_url": "/The-GIVE-Day-Hub/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b2d5c",
+  "icons": [
+    {
+      "src": "/The-GIVE-Day-Hub/icons.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
